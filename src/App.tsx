@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import type { Profile, Choice } from './types';
-import { PROFILES } from './data/profiles';
-import { SCENARIOS } from './data/scenarios';
+import type { Profile, Choice, Cartridge, PhotoItem } from './types';
+import { CARTRIDGES, PROFILES, getCartridgeByProfileId } from './cartridges';
 import { DevDashboard } from './components/DevDashboard';
 import './App.css';
 
@@ -24,67 +23,66 @@ interface Notification {
 
 function App() {
   const [view, setView] = useState<View>('lock-screen');
-  const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
+  const [activeCartridge, setActiveCartridge] = useState<Cartridge | null>(null);
   const [currentStepId, setCurrentStepId] = useState<string | null>(null);
   const [history, setHistory] = useState<Message[]>([]);
   const [interestScore, setInterestScore] = useState(5);
-  const [unlockedIds] = useState<string[]>([PROFILES[0].id]);
+  const unlockedIds = CARTRIDGES.map(c => c.profile.id);
   const [isTyping, setIsTyping] = useState(false);
-  const [, setImageError] = useState<string | null>(null);
   const [userInput, setUserInput] = useState("");
   const [wrongAttempts, setWrongAttempts] = useState(0);
   const [isFastMode, setIsFastMode] = useState(false);
-  const [hasLeaAlbum, setHasLeaAlbum] = useState(false);
-  const [leaAlbumPhase, setLeaAlbumPhase] = useState<0 | 1 | 2>(0);
+  const [albumPhaseReached, setAlbumPhaseReached] = useState(-1);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  const activeProfile = activeCartridge?.profile || null;
 
   const pushNotification = (title: string, message: string, icon: string, app: View, action?: () => void) => {
     const id = Math.random().toString(36).substring(2, 9);
     const newNotif = { id, title, message, icon, app, action };
     setNotifications(prev => [...prev, newNotif]);
-    
-    // Supprimer la notification après 6 secondes (plus long pour le début)
+
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 6000);
   };
 
-  // Séquence de démarrage immersive
-  useEffect(() => {
-    if (view === 'lock-screen') {
-      const timer = setTimeout(() => {
-        pushNotification(
-          "Spark", 
-          "Nouveau Match ! Léa vous a envoyé un message.", 
-          "✨", 
-          "feed"
-        );
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, []);
+  const handleSelectScenario = (cartridge: Cartridge) => {
+    setActiveCartridge(cartridge);
 
-  const currentStep = activeProfile && currentStepId 
-    ? SCENARIOS[activeProfile.scenarioId].steps[currentStepId] 
+    if (cartridge.startNotification) {
+      const notif = cartridge.startNotification;
+      pushNotification(notif.title, notif.message, notif.icon, 'feed', () => {
+        handleMatch(cartridge.profile);
+      });
+    }
+
+    handleMatch(cartridge.profile);
+  };
+
+  const currentStep = activeCartridge && currentStepId
+    ? activeCartridge.scenario.steps[currentStepId]
     : null;
 
-  // Gestion des phases de l'album Léa
+  // Album photo phases — driven by cartridge config
   useEffect(() => {
-    if (currentStepId === 'lea_rebus_setup' && !hasLeaAlbum) {
-      setHasLeaAlbum(true);
-      setLeaAlbumPhase(1);
-      pushNotification("Photos", "Nouvel album partagé : Léa", "🖼️", "photos-home");
-    } else if ((currentStepId === 'filler_gps' || currentStepId === 'mirror_challenge') && leaAlbumPhase < 2) {
-      setLeaAlbumPhase(2);
-      pushNotification("Photos", "Léa a ajouté une photo dans l'album", "🖼️", "photos-home");
+    if (!activeCartridge?.apps.photos || !currentStepId) return;
+    const photoConfig = activeCartridge.apps.photos;
+
+    for (let i = albumPhaseReached + 1; i < photoConfig.phases.length; i++) {
+      const phase = photoConfig.phases[i];
+      if (phase.triggerStepIds.includes(currentStepId)) {
+        setAlbumPhaseReached(i);
+        if (phase.notification) {
+          pushNotification(phase.notification.title, phase.notification.message, phase.notification.icon, 'photos-home');
+        }
+        break;
+      }
     }
   }, [currentStepId]);
 
   const getDelay = (ms: number) => isFastMode ? 0 : ms;
 
-  const imageUrl = currentStep?.visualPrompt
-    ? `https://image.pollinations.ai/prompt/${encodeURIComponent(currentStep.visualPrompt)}?width=1080&height=1600&nologo=true&seed=${activeProfile?.masterSeed || 42}`
-    : null;
   const handleImageError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     const target = e.target as HTMLImageElement;
     target.src = `https://images.unsplash.com/photo-1595959183082-c8c7009f33a0?w=500&q=80`;
@@ -93,33 +91,33 @@ function App() {
   const handleMatch = (profile: Profile) => {
     if (!unlockedIds.includes(profile.id)) return;
 
-    const scenario = SCENARIOS[profile.scenarioId];
-    if (scenario) {
-      setActiveProfile(profile);
-      setView('chat');
-      setIsTyping(true);
-      setImageError(null);
-      setInterestScore(5); 
-      setCurrentStepId(scenario.startStepId);
-      
-      const firstStep = scenario.steps[scenario.startStepId];
-      let delay = 1000;
-      firstStep.girlMessages.forEach((msg, index) => {
-        setTimeout(() => {
-          setHistory(prev => [...prev, { sender: 'girl', text: msg, isPhysical: firstStep.isPhysical }]);
-          if (index === firstStep.girlMessages.length - 1) setIsTyping(false);
-        }, getDelay(delay));
-        delay += 1500;
-      });
-    }
+    const cartridge = getCartridgeByProfileId(profile.id);
+    if (!cartridge) return;
+
+    const scenario = cartridge.scenario;
+    setActiveCartridge(cartridge);
+    setView('chat');
+    setIsTyping(true);
+    setInterestScore(5);
+    setCurrentStepId(scenario.startStepId);
+
+    const firstStep = scenario.steps[scenario.startStepId];
+    let delay = 1000;
+    firstStep.girlMessages.forEach((msg, index) => {
+      setTimeout(() => {
+        setHistory(prev => [...prev, { sender: 'girl', text: msg, isPhysical: firstStep.isPhysical }]);
+        if (index === firstStep.girlMessages.length - 1) setIsTyping(false);
+      }, getDelay(delay));
+      delay += 1500;
+    });
   };
 
   const handleChoice = (choice: Choice) => {
-    if (!activeProfile || !currentStepId || isTyping) return;
+    if (!activeCartridge || !currentStepId || isTyping) return;
 
-    const scenario = SCENARIOS[activeProfile.scenarioId];
+    const scenario = activeCartridge.scenario;
     const step = scenario.steps[currentStepId];
-    
+
     setHistory(prev => [...prev, { sender: 'player', text: choice.text, isPhysical: step.isPhysical }]);
     const newScore = Math.max(0, Math.min(10, interestScore + (choice.interestDelta || 0)));
     setInterestScore(newScore);
@@ -147,11 +145,11 @@ function App() {
     if (!currentStep || !userInput.trim() || isTyping) return;
 
     const isCorrect = userInput.trim().toLowerCase() === currentStep.expectedAnswer?.toLowerCase();
-    
-    setHistory(prev => [...prev, { 
-      sender: 'player', 
-      text: userInput, 
-      isPhysical: currentStep.isPhysical 
+
+    setHistory(prev => [...prev, {
+      sender: 'player',
+      text: userInput,
+      isPhysical: currentStep.isPhysical
     }]);
 
     setUserInput("");
@@ -160,7 +158,7 @@ function App() {
     setTimeout(() => {
       if (isCorrect) {
         setWrongAttempts(0);
-        const choice = currentStep.choices[0]; 
+        const choice = currentStep.choices[0];
         const newScore = Math.min(10, interestScore + (choice.interestDelta || 0));
         setInterestScore(newScore);
 
@@ -170,13 +168,13 @@ function App() {
             setTimeout(() => {
               setHistory(prev => [...prev, { sender: 'girl', text: msg, isPhysical: currentStep.isPhysical }]);
               if (idx === choice.reactionMessages!.length - 1) {
-                processNextSteps(choice, newScore, SCENARIOS[activeProfile!.scenarioId]);
+                processNextSteps(choice, newScore, activeCartridge!.scenario);
               }
             }, getDelay(reactionDelay));
             reactionDelay += 1500;
           });
         } else {
-          processNextSteps(choice, newScore, SCENARIOS[activeProfile!.scenarioId]);
+          processNextSteps(choice, newScore, activeCartridge!.scenario);
         }
       } else {
         setWrongAttempts(prev => prev + 1);
@@ -198,10 +196,10 @@ function App() {
 
     if (choice.nextStepId === 'END') {
       const isPhysicalEnd = currentStepId && scenario.steps[currentStepId].isPhysical;
-      setHistory(prev => [...prev, { 
-        sender: 'girl', 
-        text: newScore >= 8 ? "gagné ! ❤️" : "match terminé.", 
-        isPhysical: isPhysicalEnd 
+      setHistory(prev => [...prev, {
+        sender: 'girl',
+        text: newScore >= 8 ? "gagné ! ❤️" : "match terminé.",
+        isPhysical: isPhysicalEnd
       }]);
       setCurrentStepId(null);
       setIsTyping(false);
@@ -221,13 +219,33 @@ function App() {
 
   const reset = () => {
     setView('feed');
-    setActiveProfile(null);
+    setActiveCartridge(null);
     setCurrentStepId(null);
     setHistory([]);
     setIsTyping(false);
+    setAlbumPhaseReached(-1);
   };
 
   const lastGirlMessage = [...history].reverse().find(m => m.sender === 'girl')?.text || "";
+
+  // Collect visible album photos from all reached phases
+  const getAlbumPhotos = (): PhotoItem[] => {
+    if (!activeCartridge?.apps.photos || albumPhaseReached < 0) return [];
+    const photos: PhotoItem[] = [];
+    for (let i = 0; i <= albumPhaseReached; i++) {
+      photos.push(...activeCartridge.apps.photos.phases[i].photos);
+    }
+    return photos;
+  };
+
+  const wifiNetworks = activeCartridge?.apps.wifi
+    || CARTRIDGES.find(c => unlockedIds.includes(c.profile.id))?.apps.wifi
+    || [];
+
+  const mapsConfig = activeCartridge?.apps.maps
+    || CARTRIDGES.find(c => unlockedIds.includes(c.profile.id))?.apps.maps;
+
+  const photoConfig = activeCartridge?.apps.photos;
 
   return (
     <div className="app-container">
@@ -235,8 +253,8 @@ function App() {
       <div className="status-bar">
         <span className="time">14:02</span>
         <div className="status-icons">
-          <button 
-            className={`dev-btn ${isFastMode ? 'active' : ''}`} 
+          <button
+            className={`dev-btn ${isFastMode ? 'active' : ''}`}
             onClick={() => setIsFastMode(!isFastMode)}
             title="Mode Rapide (Dev)"
           >
@@ -261,12 +279,12 @@ function App() {
 
       <main>
         {view === 'lock-screen' ? (
-          <div className="lock-screen">
+          <div className="lock-screen" onClick={() => setView('home')}>
             <div className="lock-content">
               <span className="lock-time">14:02</span>
               <span className="lock-date">Lundi 27 Avril</span>
             </div>
-            <div className="lock-hint">Cliquer sur une notification pour déverrouiller</div>
+            <div className="lock-hint">Toucher pour déverrouiller</div>
           </div>
         ) : view === 'feed' ? (
           <div className="feed-container spark-app">
@@ -274,24 +292,47 @@ function App() {
               <div className="spark-logo">SPARK</div>
               <div className="spark-nav-icons">🔔 👤</div>
             </header>
-            <div className="spark-feed">
-              {PROFILES.filter(p => unlockedIds.includes(p.id)).slice(0, 1).map(profile => (
-                <div key={profile.id} className="spark-card">
-                  <div className="spark-card-image">
-                    <img src={profile.image} alt={profile.name} onError={handleImageError} />
-                    <div className="spark-card-overlay">
-                      <div className="spark-card-info">
-                        <h2>{profile.name}, {profile.age}</h2>
-                        <p>{profile.description}</p>
+            <div className="scenario-list">
+              {CARTRIDGES.map(cartridge => {
+                const p = cartridge.profile;
+                const isReady = Object.keys(cartridge.scenario.steps).length > 2;
+                return (
+                  <div
+                    key={p.id}
+                    className={`scenario-card ${!isReady ? 'scenario-locked' : ''}`}
+                    onClick={() => isReady && handleSelectScenario(cartridge)}
+                  >
+                    <div className="scenario-card-image">
+                      <img src={p.image} alt={p.name} onError={handleImageError} />
+                    </div>
+                    <div className="scenario-card-body">
+                      <div className="scenario-card-header">
+                        <span className="scenario-card-title">{cartridge.scenario.title}</span>
+                        {!isReady && <span className="scenario-badge-soon">Bientôt</span>}
+                      </div>
+                      <div className="scenario-card-desc">{p.name}, {p.age} — {p.description}</div>
+                      <div className="scenario-ratings">
+                        <div className="scenario-rating">
+                          <span className="scenario-rating-label">Personnel</span>
+                          <div className="scenario-dots">
+                            {[1,2,3,4,5].map(n => (
+                              <span key={n} className={`scenario-dot ${n <= cartridge.personalRating ? 'filled' : ''}`} style={{ background: n <= cartridge.personalRating ? '#ff6b8a' : 'rgba(255,255,255,.12)' }} />
+                            ))}
+                          </div>
+                        </div>
+                        <div className="scenario-rating">
+                          <span className="scenario-rating-label">Chaleur</span>
+                          <div className="scenario-dots">
+                            {[1,2,3,4,5].map(n => (
+                              <span key={n} className={`scenario-dot ${n <= cartridge.heatRating ? 'filled' : ''}`} style={{ background: n <= cartridge.heatRating ? '#ff9500' : 'rgba(255,255,255,.12)' }} />
+                            ))}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
-                  <div className="spark-card-actions">
-                    <button className="spark-action-btn skip">✕</button>
-                    <button className="spark-action-btn match" onClick={() => handleMatch(profile)}>✨ Match</button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : view === 'dev' ? (
@@ -299,7 +340,7 @@ function App() {
         ) : view === 'home' ? (
           <div className="iphone-home">
             <div className="app-grid">
-              <div className="app-icon-container" onClick={() => setView(activeProfile ? 'chat' : 'feed')}>
+              <div className="app-icon-container" onClick={() => setView(activeCartridge ? 'chat' : 'feed')}>
                 <div className="app-icon spark-icon">✨</div>
                 <span className="app-label">Spark</span>
               </div>
@@ -363,9 +404,12 @@ function App() {
               </div>
               <div className="ios-section-title">RÉSEAUX</div>
               <div className="ios-group">
-                <div className="ios-item"><span className="ios-label">Bbox-A45E2</span><span className="ios-wifi-icons">🔒 📶</span></div>
-                <div className="ios-item"><span className="ios-label">WiFi-de-Lea</span><span className="ios-wifi-icons">🔒 📶📶📶</span></div>
-                <div className="ios-item"><span className="ios-label">iPhone_de_Kevin</span><span className="ios-wifi-icons">🔒 📶📶</span></div>
+                {wifiNetworks.map(network => (
+                  <div key={network.name} className="ios-item">
+                    <span className="ios-label">{network.name}</span>
+                    <span className="ios-wifi-icons">{network.locked ? '🔒 ' : ''}{'📶'.repeat(network.signal)}</span>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -378,11 +422,11 @@ function App() {
                 <span className="album-label">Récents</span>
                 <span className="album-count">124</span>
               </div>
-              {leaAlbumPhase >= 1 && (
+              {photoConfig && albumPhaseReached >= 0 && (
                 <div className="album-item" onClick={() => setView('photos-album')}>
-                  <div className="album-thumb" style={{backgroundColor: '#ffe3e3'}}>💝</div>
-                  <span className="album-label">Léa</span>
-                  <span className="album-count">{leaAlbumPhase >= 2 ? 3 : 2}</span>
+                  <div className="album-thumb" style={{backgroundColor: '#ffe3e3'}}>{photoConfig.icon}</div>
+                  <span className="album-label">{photoConfig.name}</span>
+                  <span className="album-count">{getAlbumPhotos().length}</span>
                 </div>
               )}
             </div>
@@ -391,22 +435,22 @@ function App() {
           <div className="photos-app ios-style">
             <div className="ios-header has-back">
               <button className="ios-back-btn" onClick={() => setView('photos-home')}>‹ Albums</button>
-              <h2>Léa</h2>
+              <h2>{photoConfig?.name}</h2>
             </div>
             <div className="photos-grid">
-              <div className="photo-item">
-                <img src="https://images.unsplash.com/photo-1518114056426-304b50035048?w=400&q=80" alt="Traces de pas" />
-              </div>
-              <div className="photo-item">
-                <img src="https://images.unsplash.com/photo-1516746874974-7507efce2d94?w=400&q=80" alt="Riz" />
-              </div>
-              {leaAlbumPhase >= 2 && (
-                <div className="photo-item photo-postit-item">
-                  <div className="album-postit">
-                    <span className="postit-mirrored">ENTRE</span>
+              {getAlbumPhotos().map((photo, i) => (
+                photo.type === 'image' ? (
+                  <div key={i} className="photo-item">
+                    <img src={photo.src} alt={photo.alt} />
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div key={i} className="photo-item photo-postit-item">
+                    <div className="album-postit">
+                      <span className="postit-mirrored">{photo.postitText}</span>
+                    </div>
+                  </div>
+                )
+              ))}
             </div>
           </div>
         ) : view === 'maps' ? (
@@ -429,28 +473,30 @@ function App() {
               <div className="maps-block" style={{ top: '22%', left: '47%', width: '26%', height: '21%' }} />
               <div className="maps-block" style={{ top: '47%', left: '17%', width: '26%', height: '21%' }} />
               <div className="maps-park" style={{ top: '47%', left: '47%', width: '26%', height: '21%' }} />
-              <div className="maps-pin-marker">📍</div>
+              {mapsConfig && <div className="maps-pin-marker">📍</div>}
             </div>
-            <div className="maps-bottom-sheet">
-              <div className="maps-sheet-handle" />
-              <div className="maps-pin-row">
-                <span className="maps-pin-emoji">📍</span>
-                <div className="maps-pin-details">
-                  <div className="maps-pin-coords">48°51'29" N, 2°17'40" E</div>
-                  <div className="maps-pin-meta">Partagé par Léa • à l'instant</div>
+            {mapsConfig && (
+              <div className="maps-bottom-sheet">
+                <div className="maps-sheet-handle" />
+                <div className="maps-pin-row">
+                  <span className="maps-pin-emoji">📍</span>
+                  <div className="maps-pin-details">
+                    <div className="maps-pin-coords">{mapsConfig.coords}</div>
+                    <div className="maps-pin-meta">Partagé par {mapsConfig.sharedBy} • à l'instant</div>
+                  </div>
+                </div>
+                <div className="maps-actions">
+                  <button className="maps-action-btn maps-action-primary">🚗 Itinéraire</button>
+                  <button className="maps-action-btn">📤 Partager</button>
+                  <button className="maps-action-btn">🔍 À proximité</button>
                 </div>
               </div>
-              <div className="maps-actions">
-                <button className="maps-action-btn maps-action-primary">🚗 Itinéraire</button>
-                <button className="maps-action-btn">📤 Partager</button>
-                <button className="maps-action-btn">🔍 À proximité</button>
-              </div>
-            </div>
+            )}
           </div>
         ) : currentStep?.isPhysical ? (
           <div className="vn-container">
             <div className="vn-background-layer">
-              <img src={imageUrl || ""} alt="Scene" onError={handleImageError} />
+              {currentStep.image && <img src={currentStep.image} alt="Scene" onError={handleImageError} />}
               <div className="vn-overlay"></div>
             </div>
             <div className="vn-ui">
@@ -472,17 +518,34 @@ function App() {
           </div>
         ) : (
           <div className="chat-container spark-chat">
+            <div className="chat-bg-layer">
+              <img src={currentStep?.image || activeProfile?.image} alt="" />
+            </div>
             <header className="chat-nav">
               <button onClick={reset} className="ios-back-btn">‹ Spark</button>
               <div className="chat-nav-profile">
-                <img src={activeProfile?.image} alt={activeProfile?.name} className="mini-avatar" />
+                <div className="avatar-wrapper">
+                  <img src={activeProfile?.image} alt={activeProfile?.name} className="mini-avatar" />
+                  <span className="online-dot"></span>
+                </div>
                 <span className="nav-title">{activeProfile?.name}</span>
               </div>
               <div className="chat-nav-actions">📞 📹</div>
             </header>
-            <div className="interest-header">
-              <div className="interest-bar-bg"><div className="interest-bar-fill" style={{ width: `${(interestScore / 10) * 100}%` }}></div></div>
-            </div>
+            {currentStep?.image && (
+              <div className="chat-scene-image">
+                <img src={currentStep.image} alt="" />
+                <div className="chat-scene-fade"></div>
+                <div className="chat-scene-interest">
+                  <div className="interest-bar-bg"><div className="interest-bar-fill" style={{ width: `${(interestScore / 10) * 100}%` }}></div></div>
+                </div>
+              </div>
+            )}
+            {!currentStep?.image && (
+              <div className="interest-header">
+                <div className="interest-bar-bg"><div className="interest-bar-fill" style={{ width: `${(interestScore / 10) * 100}%` }}></div></div>
+              </div>
+            )}
             <div className="messages">
               {history.map((msg, i) => (
                 <div key={i} className={`message ${msg.sender}`}><div className="bubble">{msg.text}</div></div>

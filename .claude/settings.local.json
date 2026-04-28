@@ -1,8 +1,14 @@
 {
   "permissions": {
     "allow": [
-      "Bash(nvm list *)",
-      "PowerShell(winget install *)"
+      "Bash(git fetch *)",
+      "Bash(git stash *)",
+      "Bash(git pull *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(npx tsc *)",
+      "Bash(node *)",
+      "Bash(npm run *)"
     ]
   }
 }

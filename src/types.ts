@@ -15,7 +15,7 @@ export interface Step {
   id: string;
   girlMessages: string[]; 
   choices: Choice[];
-  visualPrompt?: string;
+  image?: string;
   behavior?: StepBehavior;
   isPhysical?: boolean; // Indique si on est en face à face
   inputType?: 'choice' | 'text'; // Type d'entrée attendu
@@ -40,4 +40,50 @@ export interface Profile {
   scenarioId: string;
   hints: string[];
   masterSeed?: number;
+}
+
+// ── Cartridge system ─────────────────────────────────────────────────
+
+export interface WifiNetwork {
+  name: string;
+  locked: boolean;
+  signal: 1 | 2 | 3;
+}
+
+export interface PhotoItem {
+  type: 'image' | 'postit';
+  src?: string;
+  alt?: string;
+  postitText?: string;
+}
+
+export interface PhotoPhase {
+  triggerStepIds: string[];
+  photos: PhotoItem[];
+  notification?: { title: string; message: string; icon: string };
+}
+
+export interface PhotoAlbumConfig {
+  name: string;
+  icon: string;
+  phases: PhotoPhase[];
+}
+
+export interface MapsConfig {
+  coords: string;
+  sharedBy: string;
+}
+
+export interface Cartridge {
+  profile: Profile;
+  scenario: Scenario;
+  castingPrompt?: string;
+  startNotification?: { title: string; message: string; icon: string };
+  personalRating: 1 | 2 | 3 | 4 | 5;
+  heatRating: 1 | 2 | 3 | 4 | 5;
+  apps: {
+    wifi?: WifiNetwork[];
+    photos?: PhotoAlbumConfig;
+    maps?: MapsConfig;
+  };
 }
