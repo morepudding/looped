@@ -1,7 +1,6 @@
 import type { Profile } from '../types';
 
-// Prompt simplifié pour éviter les erreurs d'URL trop longue
-const LEA_BASE = "Young French woman, messy ginger hair, green eyes, freckles, cute face, realistic";
+// Image de profil Léa
 const LEA_PROFILE_URL = "https://image.pollinations.ai/prompt/Young%20French%20woman%20messy%20ginger%20hair%20green%20eyes%20freckles%20cute%20face%20realistic?width=400&height=400&nologo=true&seed=42";
 
 export const PROFILES: Profile[] = [

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(nvm list *)",
+      "PowerShell(winget install *)"
+    ]
+  }
+}

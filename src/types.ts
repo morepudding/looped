@@ -21,6 +21,7 @@ export interface Step {
   inputType?: 'choice' | 'text'; // Type d'entrée attendu
   expectedAnswer?: string; // Réponse attendue si inputType est 'text'
   wrongAnswerMessages?: string[]; // Messages si la réponse est fausse
+  mirrorText?: string; // Texte affiché en miroir (CSS scaleX(-1)) sur un post-it
 }
 
 export interface Scenario {
